@@ -11,6 +11,7 @@ import argparse
 import numpy as np
 import random 
 import matplotlib.pyplot as plt 
+from scipy import optimize
 
 class Sampler:
     def __init__(self, standard_deviation = 0):
@@ -35,6 +36,15 @@ class KalmanFilter:
     def setup(self, no_steps, p_value = 1):
         self.number_of_steps = no_steps
         self.p = p_value
+
+    def update_params(self, params):
+        self.q = params[0]
+        self.r = params[1]
+        self.h = params[2]
+        self.a = params[3]
+
+    def get_params(self):
+        return [self.q, self.r, self.h, self.a]
 
     def update(self, calculated_value, measured_value):
         temp_p = self.a * self.a * self.p + self.q
@@ -70,7 +80,7 @@ class Simulation:
     def setup(self, expected_velocity, start_time, velocity_deviation, position_deviation):
         self.expected_velocity[int(start_time):] = expected_velocity
         self.velocity_measure = Sampler(velocity_deviation)
-        self.position_meausre = Sampler(position_deviation)
+        self.position_measure = Sampler(position_deviation)
         self.kalman_filter.setup(self.no_steps)
 
     def sum(self, list):
@@ -78,15 +88,34 @@ class Simulation:
         for item in list:
             total = total + item
         return total
+
+    def fit(self, initial_values):
+        kalman_filter = KalmanFilter(initial_values[0], initial_values[1], initial_values[2], initial_values[3])
+        kalman_filter.setup(self.no_steps)
+        true_position = np.zeros(self.no_steps)
+        measured_position = np.zeros(self.no_steps)
+        velocity = np.zeros(self.no_steps)
+        calculate_position = np.zeros(self.no_steps)
+        kalman_position = np.zeros(self.no_steps)
+        error = np.zeros(self.no_steps)
+        for i in range(self.no_steps - 1):
+            true_position[i] = true_position[i - 1] + self.expected_velocity[i - 1] * self.time_step
+            measured_position[i] = self.position_measure.get_sample_value(true_position[i])
+            velocity[i] = self.velocity_measure.get_sample_value(self.expected_velocity[i]) 
+            calculate_position[i] = calculate_position[i - 1] + velocity[i] * self.time_step 
+            kalman_position[i] = kalman_filter.update(calculate_position[i], measured_position[i])
+            error[i] = abs(kalman_position[i] - true_position[i])
+        return sum(error)
     
     def simulate(self):
+        self.kalman_filter.update_params(optimize.fmin(self.fit, self.kalman_filter.get_params()))
         plt.figure(1, figsize = (5, 4))
         plt.ion()
         plt.show()
 
         for i in range(self.no_steps - 1):
             self.true_position[i] = self.true_position[i - 1] + self.expected_velocity[i - 1] * self.time_step
-            self.measured_position[i] = self.position_meausre.get_sample_value(self.true_position[i])
+            self.measured_position[i] = self.position_measure.get_sample_value(self.true_position[i])
             self.velocity[i] = self.velocity_measure.get_sample_value(self.expected_velocity[i]) 
             self.calculate_position[i] = self.calculate_position[i - 1] + self.velocity[i] * self.time_step 
             self.kalman_position[i] = self.kalman_filter.update(self.calculate_position[i], self.measured_position[i])
@@ -119,6 +148,7 @@ class Simulation:
         print(self.sum(self.error_calculate_true))
         print(self.sum(self.error_kalman_true))
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--sensors", nargs = '+', type = float, help = "velocity_deviation position_deviation")
 parser.add_argument("--sim", nargs = '+', type = float, help = "total_time start_time expected_velocity")
@@ -126,5 +156,5 @@ parser.add_argument("--sim", nargs = '+', type = float, help = "total_time start
 args = parser.parse_args()
 sim = Simulation(args.sim[0], 1.0)
 sim.setup(args.sim[2], args.sim[1], args.sensors[0], args.sensors[1])
-sim.simulate()  
 
+sim.simulate()  
